@@ -5,11 +5,39 @@
 """
 
 import json
+import random
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MAX_RESULTS = 3
+
+
+def save_learning_log(lecture: int, content: str) -> str:
+    """指定した回の学習内容・気づきを学習ログに追記する。実行には利用者の承認が必要。
+
+    利用者が「学習内容を保存して」「学習ログを残して」と求めたときに使う。
+    lecture は講義の回（1始まり）、content は保存する学習内容。
+    """
+    if lecture < 1:
+        return "保存できませんでした。講義の回は1以上で指定してください。"
+    if not content.strip():
+        return "保存できませんでした。学習内容が空です。"
+
+    path = DATA_DIR / "learning_logs.jsonl"
+    record = {
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "lecture": lecture,
+        "content": content,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as e:
+        return f"学習ログの保存に失敗しました: {e}"
+    return f"第{lecture}回の学習ログを保存しました: {path}"
 
 
 @cache
@@ -77,3 +105,31 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から1つを選び、
+    確認問題と答えを返す。
+    「第2回の確認問題を出して」のように、
+    復習用の問題を求められたときに使う。
+    """
+    glossary = load_glossary()
+    terms = [entry for entry in glossary if entry.get("lecture") == lecture]
+    if not terms:
+        available = sorted({entry["lecture"] for entry in glossary})
+        if available:
+            lecture_list = ", ".join(f"第{n}回" for n in available)
+            return f"第{lecture}回の用語は見つかりませんでした。用意されている回: {lecture_list}"
+        return f"第{lecture}回の用語はまだありません。"
+
+    entry = random.choice(terms)
+    question = f"第{lecture}回の用語「{entry['term']}」の意味を、1〜2文で説明してください。"
+    answer = f"{entry['term']}：{entry['definition']}"
+    return json.dumps(
+        {
+            "lecture": lecture,
+            "term": entry["term"],
+            "question": question,
+            "answer": answer,
+        },
+        ensure_ascii=False,
+    )
